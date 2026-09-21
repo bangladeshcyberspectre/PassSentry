@@ -11,7 +11,8 @@ Usage:
     python passsentry.py                  # prompts for a password (hidden input)
     python passsentry.py --file list.txt  # check many passwords, one per line
 
-Exit codes: 0 = not found, 1 = found in breaches, 2 = error.
+Passwords must be at least 6 characters (change with --min-length).
+Exit codes: 0 = OK, 1 = found in breaches or too short, 2 = error.
 Standard library only. Python 3.8+.
 """
 
@@ -25,6 +26,7 @@ import urllib.error
 import urllib.request
 
 API_URL = "https://api.pwnedpasswords.com/range/"
+MIN_LENGTH = 6  # minimum acceptable password length
 
 
 def sha1_hex(password: str) -> str:
@@ -77,7 +79,11 @@ def strength_tips(password: str) -> list:
     return tips
 
 
-def report_single(password: str) -> int:
+def report_single(password: str, min_length: int = MIN_LENGTH) -> int:
+    if len(password) < min_length:
+        print(f"TOO SHORT: passwords must be at least {min_length} characters.")
+        print("Not checked. Pick a longer password, ideally a long passphrase.")
+        return 1
     count = breach_count(password)
     if count:
         print(f"PWNED: this password appears {count:,} times in known breaches.")
@@ -92,7 +98,7 @@ def report_single(password: str) -> int:
     return code
 
 
-def report_file(path: str) -> int:
+def report_file(path: str, min_length: int = MIN_LENGTH) -> int:
     worst = 0
     try:
         with open(path, "r", encoding="utf-8") as fh:
@@ -102,8 +108,12 @@ def report_file(path: str) -> int:
         return 2
 
     for i, pw in enumerate(lines, start=1):
-        count = breach_count(pw)
         masked = pw[0] + "*" * (len(pw) - 1) if pw else ""
+        if len(pw) < min_length:
+            worst = 1
+            print(f"line {i:>4}  {masked:<20} TOO SHORT (min {min_length})")
+            continue
+        count = breach_count(pw)
         if count:
             worst = 1
             print(f"line {i:>4}  {masked:<20} PWNED ({count:,}x)")
@@ -120,16 +130,23 @@ def main() -> int:
     parser.add_argument(
         "-f", "--file", help="text file with one password per line"
     )
+    parser.add_argument(
+        "-m",
+        "--min-length",
+        type=int,
+        default=MIN_LENGTH,
+        help=f"minimum password length (default: {MIN_LENGTH})",
+    )
     args = parser.parse_args()
 
     try:
         if args.file:
-            return report_file(args.file)
+            return report_file(args.file, args.min_length)
         password = getpass.getpass("Password to check (hidden): ")
         if not password:
             print("No password entered.", file=sys.stderr)
             return 2
-        return report_single(password)
+        return report_single(password, args.min_length)
     except urllib.error.URLError as exc:
         print(f"Network error: {exc}", file=sys.stderr)
         return 2
